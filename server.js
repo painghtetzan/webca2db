@@ -2,6 +2,7 @@ const express = require('express')
 const sql = require("mysql2/promise")
 const bcrypt = require("bcrypt")
 const cors = require("cors")
+const jwt = require('jsonwebtoken')
 const port = 3000
 
 require('dotenv').config()
@@ -19,6 +20,7 @@ const dbConfig ={
 
 const app = express()
 app.use(express.json())
+const secret = process.env.JWT
 app.use(cors({
     origin:[
         'http://localhost:3000'
@@ -28,8 +30,25 @@ app.listen(port,()=>{
     console.log('server is running!')
 })
 
+function authenticator(req,res,next){
+    const authHeader = req.headers["authorization"]
+    const token = authHeader && authHeader.split('')[1]
 
-app.get("/allactivities",async(req,res)=>{
+    if(!token){
+       return  res.status(401).json("Authentication failed")
+    }
+
+    jwt.verify(token,secret,(err,decoded)=>{
+        if(err){
+         return   res.status(403).json("Authorization failed")
+        }
+        req.user = decoded
+        next()
+
+    })
+}
+
+app.get("/allactivities",authenticator,async(req,res)=>{
     let connection
 
     try{
@@ -44,7 +63,7 @@ app.get("/allactivities",async(req,res)=>{
     }
 })
 
-app.put("/edit/:id",async(req,res)=>{
+app.put("/edit/:id",authenticator,async(req,res)=>{
     let connection  
     const id = req.params.id
     const {name,description,time} = req.body
@@ -60,7 +79,7 @@ app.put("/edit/:id",async(req,res)=>{
     }
 })
 
-app.delete("/delete/:id",async(req,res)=>{
+app.delete("/delete/:id",authenticator,async(req,res)=>{
     let connection  
     const id = req.params.id
     
@@ -75,6 +94,8 @@ app.delete("/delete/:id",async(req,res)=>{
         connection ?   await connection.end() :''
     }
 })
+
+
 
 
 app.post("/register",async(req,res)=>{
@@ -112,7 +133,10 @@ app.post("/login",async(req,res)=>{
             return res.status(500).json({message:"login fail"})
         }
         else{
-            return res.status(200).json({message:'login success!'})
+            const token = jwt.sign(
+                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expirein:"1h"}
+            )
+            return res.json({token})
         }
         
     }catch(err){
