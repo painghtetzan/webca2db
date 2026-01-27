@@ -21,6 +21,7 @@ const dbConfig ={
 const app = express()
 app.use(express.json())
 const secret = process.env.JWT
+
 app.use(cors({
     origin:[
         'http://localhost:3000'
@@ -48,8 +49,9 @@ function authenticator(req,res,next){
     })
 }
 
-app.get("/allactivities",authenticator,async(req,res)=>{
+app.get("/allactivities",async(req,res)=>{
     let connection
+   
 
     try{
         connection = await sql.createConnection(dbConfig)
@@ -130,11 +132,11 @@ app.post("/login",async(req,res)=>{
         const valid = await bcrypt.compare(password,rows[0].password)
 
         if(!valid){
-            return res.status(500).json({message:"login fail"})
+            return res.status(401).json({message:"invalid password"})
         }
         else{
             const token = jwt.sign(
-                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expirein:"1h"}
+                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expireIn:"1h"}
             )
             return res.json({token})
         }
