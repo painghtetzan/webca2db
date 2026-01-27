@@ -102,13 +102,21 @@ app.delete("/delete/:id",authenticator,async(req,res)=>{
 
 app.post("/register",async(req,res)=>{
     const {name,email,password,role,school} = req.body
-    const hashedPassword =await bcrypt.hash(password,10)
-
+    
+    
     let connection 
     try{
+        
         connection = await sql.createConnection(dbConfig)
+        const [rows] =  await connection.execute('SELECT * FROM Registeration WHERE email=?',[email])
+        if(rows.length>0){
+            return res.status(409).json('email already registered')
+        }
+
+        const hashedPassword =await bcrypt.hash(password,10)
+        
         await connection.execute('INSERT INTO Registeration (name,email,password,role,school) VALUES (?,?,?,?,?)',[name,email,hashedPassword,role,school])
-        res.status(200).json('successfully registered')
+        res.status(201).json('successfully registered')
     }catch(err){
         console.error(err)
         res.status(500).json({message:'error registeration'})
