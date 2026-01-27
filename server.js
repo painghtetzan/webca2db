@@ -110,7 +110,7 @@ app.post("/register",async(req,res)=>{
         connection = await sql.createConnection(dbConfig)
         const [rows] =  await connection.execute('SELECT * FROM Registeration WHERE email=?',[email])
         if(rows.length>0){
-            return res.status(409).json('email already registered')
+            return res.status(409).json({message:'email already registered'})
         }
 
         const hashedPassword =await bcrypt.hash(password,10)
