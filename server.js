@@ -33,7 +33,7 @@ app.listen(port,()=>{
 
 function authenticator(req,res,next){
     const authHeader = req.headers["authorization"]
-    const token = authHeader && authHeader.split('')[1]
+    const token = authHeader && authHeader.split(' ')[1]
 
     if(!token){
        return  res.status(401).json("Authentication failed")
@@ -136,7 +136,7 @@ app.post("/login",async(req,res)=>{
         }
         else{
             const token = jwt.sign(
-                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expireIn:"1h"}
+                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expiresIn:"1h"}
             )
             return res.json({token})
         }
