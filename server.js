@@ -72,13 +72,12 @@ app.post("/add",authenticator,async(req,res)=>{
 
     const {type,time,name,description} = req.body
     const {userId,userSchool} = req.user
-    console.log(type,time,name,description,userId,userSchool)
+    
     
 
     try{
         connection = await sql.createConnection(dbConfig)
-        const [db] = await connection.execute("SELECT DATABASE()");
-        console.log("CONNECTED DATABASE:", db[0]);
+        
         await connection.execute('INSERT INTO defaultdb.Information (time,name,createdBy_id,school,description,type) VALUES(?,?,?,?,?,?)',[time,name,userId,userSchool,description,type])
         res.status(201).json({message:"successfully created"})
     }catch(err){
@@ -95,7 +94,7 @@ app.put("/edit/:id",authenticator,async(req,res)=>{
     const {time,name,description,type} = req.body
     try{
         connection = await sql.createConnection(dbConfig)
-        await connection.execute('UPDATE  Information SET  time =? name=?, description=?, type=? WHERE id=?',[time,name,description,type,id])
+        await connection.execute('UPDATE  Information SET  time=?, name=?, description=?, type=? WHERE id=?',[time,name,description,type,id])
         res.status(200).json({message:'update success'})
     }catch(err){
         console.error(err)
