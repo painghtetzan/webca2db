@@ -67,6 +67,24 @@ app.get("/allactivities",authenticator,async(req,res)=>{
     }
 })
 
+app.post("/add",authenticator,async(req,res)=>{
+    let connection
+
+    const {type,time,name,description} = req.body
+    const {userId,userSchool} = req.user
+
+    try{
+        connection = await sql.createConnection(dbConfig)
+        await connection.execute('INSERT INTO Information (type,time,name,createdBy_id,school,description) VALUES(?,?,?,?,?,?)',[type,time,name,userId,userSchool,description])
+        res.status(201).json({message:"successfully created"})
+    }catch(err){
+        console.error(err)
+        res.status(500).json({message:'Error creating new item'})
+    }finally{
+        if(connection) await connection.end()
+    }
+})
+
 app.put("/edit/:id",authenticator,async(req,res)=>{
     let connection  
     const id = req.params.id
