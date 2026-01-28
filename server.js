@@ -1,5 +1,5 @@
 const express = require("express");
-const sql = require("mysql2/promise");
+const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
@@ -7,33 +7,14 @@ require("dotenv").config();
 
 const app = express();
 
-/* ===================== PORT ===================== */
+/* ===================== CONFIG ===================== */
 const port = process.env.PORT || 5000;
+const secret = process.env.JWT;
 
-/* ===================== CORS (FIXED) ===================== */
-/*
-  This FIXES:
-  - CORS blocked
-  - OPTIONS /login 404
-  - No Access-Control-Allow-Origin header
-*/
-const corsOptions = {
-  origin: [
-    "http://localhost:3000",
-    "https://educationreminder.netlify.app",
-    "https://www.educationreminder.netlify.app",
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+if (!secret) {
+  throw new Error("❌ JWT secret missing. Set JWT in environment variables.");
+}
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // ✅ VERY IMPORTANT
-
-/* ===================== MIDDLEWARE ===================== */
-app.use(express.json());
-
-/* ===================== DB CONFIG ===================== */
 const dbConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -45,66 +26,115 @@ const dbConfig = {
   queueLimit: 0,
 };
 
-/* ===================== JWT ===================== */
-const secret = process.env.JWT;
-if (!secret) {
-  console.error("❌ JWT secret missing in environment variables");
+/* ===================== DB POOL (FAST) ===================== */
+const pool = mysql.createPool(dbConfig);
+
+/* ===================== CORS ===================== */
+// Put your frontend URLs here (local + deployed)
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://educationreminder.netlify.app",
+  "https://www.educationreminder.netlify.app",
+];
+
+// Allow requests with no Origin (e.g., Postman) + allowed origins
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error("CORS not allowed for this origin: " + origin));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
+/* ===================== MIDDLEWARE ===================== */
+app.use(express.json());
+
+/* ===================== HELPERS ===================== */
+function signToken(userRow) {
+  return jwt.sign(
+    {
+      userId: userRow.id,
+      userName: userRow.name,
+      userRole: userRow.role,
+      userSchool: userRow.school,
+    },
+    secret,
+    { expiresIn: "1h" }
+  );
 }
 
-/* ===================== HEALTH CHECK ===================== */
+/* ===================== AUTH ===================== */
+function authenticator(req, res, next) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) return res.status(401).json({ message: "Authentication failed" });
+
+  try {
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(403).json({ message: "Authorization failed" });
+  }
+}
+
+function requireLecturer(req, res, next) {
+  if (req.user?.userRole !== "lecturer") {
+    return res.status(403).json({ message: "Forbidden: Lecturer only" });
+  }
+  next();
+}
+
+/* ===================== HEALTH ===================== */
 app.get("/", (req, res) => {
   res.json({ ok: true, message: "Backend is running" });
 });
 
-/* ===================== AUTH MIDDLEWARE ===================== */
-function authenticator(req, res, next) {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).json({ message: "Authentication failed" });
+app.get("/health/db", async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT 1 AS ok");
+    res.json({ ok: true, db: rows[0] });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: "DB not reachable", error: e.message });
   }
-
-  jwt.verify(token, secret, (err, decoded) => {
-    if (err) {
-      return res.status(403).json({ message: "Authorization failed" });
-    }
-    req.user = decoded;
-    next();
-  });
-}
+});
 
 /* ===================== ROUTES ===================== */
 
 /* ---------- GET ACTIVITIES ---------- */
 app.get("/allactivities", authenticator, async (req, res) => {
-  const { userSchool } = req.user;
-  let connection;
-
   try {
-    connection = await sql.createConnection(dbConfig);
-    const [rows] = await connection.execute(
-      "SELECT * FROM Information WHERE school=?",
+    const { userSchool } = req.user;
+    const [rows] = await pool.execute(
+      "SELECT * FROM Information WHERE school=? ORDER BY time ASC",
       [userSchool]
     );
     res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Error retrieving activities" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
-/* ---------- ADD ACTIVITY ---------- */
-app.post("/add", authenticator, async (req, res) => {
+/* ---------- ADD ACTIVITY (LECTURER ONLY) ---------- */
+app.post("/add", authenticator, requireLecturer, async (req, res) => {
   const { type, time, name, description } = req.body;
   const { userId, userSchool } = req.user;
-  let connection;
+
+  if (!type || !time || !name) {
+    return res.status(400).json({ message: "Missing required fields: type, time, name" });
+  }
 
   try {
-    connection = await sql.createConnection(dbConfig);
-    await connection.execute(
+    await pool.execute(
       "INSERT INTO Information (time,name,createdBy_id,school,description,type) VALUES (?,?,?,?,?,?)",
       [time, name, userId, userSchool, description || "", type]
     );
@@ -112,58 +142,64 @@ app.post("/add", authenticator, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Create failed" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
-/* ---------- UPDATE ---------- */
-app.put("/edit/:id", authenticator, async (req, res) => {
+/* ---------- UPDATE (LECTURER ONLY) ---------- */
+app.put("/edit/:id", authenticator, requireLecturer, async (req, res) => {
   const { time, name, description, type } = req.body;
-  const id = req.params.id;
-  let connection;
+  const { id } = req.params;
+
+  if (!type || !time || !name) {
+    return res.status(400).json({ message: "Missing required fields: type, time, name" });
+  }
 
   try {
-    connection = await sql.createConnection(dbConfig);
-    await connection.execute(
+    const [result] = await pool.execute(
       "UPDATE Information SET time=?, name=?, description=?, type=? WHERE id=?",
       [time, name, description || "", type, id]
     );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
     res.json({ message: "Update success" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Update failed" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
-/* ---------- DELETE ---------- */
-app.delete("/delete/:id", authenticator, async (req, res) => {
-  const id = req.params.id;
-  let connection;
+/* ---------- DELETE (LECTURER ONLY) ---------- */
+app.delete("/delete/:id", authenticator, requireLecturer, async (req, res) => {
+  const { id } = req.params;
 
   try {
-    connection = await sql.createConnection(dbConfig);
-    await connection.execute("DELETE FROM Information WHERE id=?", [id]);
+    const [result] = await pool.execute("DELETE FROM Information WHERE id=?", [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
     res.json({ message: "Delete success" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Delete failed" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
 /* ---------- REGISTER ---------- */
 app.post("/register", async (req, res) => {
   const { name, email, password, role, school } = req.body;
-  let connection;
+
+  if (!name || !email || !password || !role || !school) {
+    return res.status(400).json({ message: "Missing required fields" });
+  }
 
   try {
-    connection = await sql.createConnection(dbConfig);
-    const [rows] = await connection.execute(
-      "SELECT * FROM Registeration WHERE email=?",
+    const [rows] = await pool.execute(
+      "SELECT id FROM Registeration WHERE email=?",
       [email]
     );
 
@@ -173,7 +209,7 @@ app.post("/register", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await connection.execute(
+    await pool.execute(
       "INSERT INTO Registeration (name,email,password,role,school) VALUES (?,?,?,?,?)",
       [name, email, hashedPassword, role, school]
     );
@@ -182,19 +218,19 @@ app.post("/register", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Registration failed" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
 /* ---------- LOGIN ---------- */
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  let connection;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password required" });
+  }
 
   try {
-    connection = await sql.createConnection(dbConfig);
-    const [rows] = await connection.execute(
+    const [rows] = await pool.execute(
       "SELECT * FROM Registeration WHERE email=?",
       [email]
     );
@@ -208,27 +244,27 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    const token = jwt.sign(
-      {
-        userId: rows[0].id,
-        userName: rows[0].name,
-        userRole: rows[0].role,
-        userSchool: rows[0].school,
-      },
-      secret,
-      { expiresIn: "1h" }
-    );
-
+    const token = signToken(rows[0]);
     res.json({ token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Login failed" });
-  } finally {
-    if (connection) await connection.end();
   }
 });
 
-/* ===================== START SERVER ===================== */
-app.listen(port, () => {
+/* ===================== GLOBAL ERROR HANDLER ===================== */
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err.message);
+  res.status(500).json({ message: err.message || "Server error" });
+});
+
+/* ===================== START ===================== */
+app.listen(port, async () => {
   console.log(`✅ Server running on port ${port}`);
+  try {
+    await pool.query("SELECT 1");
+    console.log("✅ DB connected");
+  } catch (e) {
+    console.log("⚠️ DB connection check failed:", e.message);
+  }
 });
