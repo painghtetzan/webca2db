@@ -49,13 +49,15 @@ function authenticator(req,res,next){
     })
 }
 
-app.get("/allactivities",async(req,res)=>{
+app.get("/allactivities",authenticator,async(req,res)=>{
+
+    const {userSchool} = req.user
     let connection
    
 
     try{
         connection = await sql.createConnection(dbConfig)
-        const [rows] = await connection.execute('SELECT * FROM Information')
+        const [rows] = await connection.execute('SELECT * FROM Information WHERE school=?',[userSchool])
         res.status(200).json(rows)
     }catch(error){
         console.error(error)
