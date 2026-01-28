@@ -144,7 +144,7 @@ app.post("/login",async(req,res)=>{
         }
         else{
             const token = jwt.sign(
-                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role},secret, {expiresIn:"1h"}
+                {userId : rows[0].id,userName:rows[0].name,userRole:rows[0].role,userSchool: rows[0].school},secret, {expiresIn:"1h"}
             )
             return res.json({token})
         }
