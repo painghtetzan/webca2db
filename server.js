@@ -92,10 +92,10 @@ app.post("/add",authenticator,async(req,res)=>{
 app.put("/edit/:id",authenticator,async(req,res)=>{
     let connection  
     const id = req.params.id
-    const {name,description,time} = req.body
+    const {time,name,description,type} = req.body
     try{
         connection = await sql.createConnection(dbConfig)
-        await connection.execute('UPDATE  Information SET name=?, description=?, time =? WHERE id=?',[name,description,time,id])
+        await connection.execute('UPDATE  Information SET  time =? name=?, description=?, type=? WHERE id=?',[time,name,description,type,id])
         res.status(200).json({message:'update success'})
     }catch(err){
         console.error(err)
