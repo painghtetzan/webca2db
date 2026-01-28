@@ -6,18 +6,34 @@ const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
-app.use(express.json());
 
-// Render provides PORT
+/* ===================== PORT ===================== */
 const port = process.env.PORT || 5000;
 
-// JWT Secret
-const secret = process.env.JWT;
-if (!secret) {
-  console.error("❌ Missing JWT secret (process.env.JWT)");
-}
+/* ===================== CORS (FIXED) ===================== */
+/*
+  This FIXES:
+  - CORS blocked
+  - OPTIONS /login 404
+  - No Access-Control-Allow-Origin header
+*/
+const corsOptions = {
+  origin: [
+    "http://localhost:3000",
+    "https://educationreminder.netlify.app",
+    "https://www.educationreminder.netlify.app",
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-// MySQL config
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // ✅ VERY IMPORTANT
+
+/* ===================== MIDDLEWARE ===================== */
+app.use(express.json());
+
+/* ===================== DB CONFIG ===================== */
 const dbConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -29,41 +45,18 @@ const dbConfig = {
   queueLimit: 0,
 };
 
-// ================== CORS ==================
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      const allowed = [
-        "http://localhost:3000",
-        "https://educationreminder.netlify.app",
-        "https://www.educationreminder.netlify.app",
-      ];
+/* ===================== JWT ===================== */
+const secret = process.env.JWT;
+if (!secret) {
+  console.error("❌ JWT secret missing in environment variables");
+}
 
-      // allow requests without origin (Postman, server-to-server)
-      if (!origin) return cb(null, true);
-
-      // allow Netlify preview deploy URLs
-      if (allowed.includes(origin) || origin.endsWith(".netlify.app")) {
-        return cb(null, true);
-      }
-
-      return cb(new Error("Not allowed by CORS: " + origin));
-    },
-    credentials: false, // using Bearer token (not cookies)
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// Preflight
-app.options("*", cors());
-
-// ================== HEALTH CHECK ==================
+/* ===================== HEALTH CHECK ===================== */
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "API is running" });
+  res.json({ ok: true, message: "Backend is running" });
 });
 
-// ================== AUTH MIDDLEWARE ==================
+/* ===================== AUTH MIDDLEWARE ===================== */
 function authenticator(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -81,9 +74,9 @@ function authenticator(req, res, next) {
   });
 }
 
-// ================== ROUTES ==================
+/* ===================== ROUTES ===================== */
 
-// Get all activities for user's school
+/* ---------- GET ACTIVITIES ---------- */
 app.get("/allactivities", authenticator, async (req, res) => {
   const { userSchool } = req.user;
   let connection;
@@ -94,89 +87,81 @@ app.get("/allactivities", authenticator, async (req, res) => {
       "SELECT * FROM Information WHERE school=?",
       [userSchool]
     );
-    res.status(200).json(rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error retrieving all activities." });
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error retrieving activities" });
   } finally {
     if (connection) await connection.end();
   }
 });
 
-// Add activity
+/* ---------- ADD ACTIVITY ---------- */
 app.post("/add", authenticator, async (req, res) => {
-  let connection;
-
   const { type, time, name, description } = req.body;
   const { userId, userSchool } = req.user;
+  let connection;
 
   try {
     connection = await sql.createConnection(dbConfig);
-
     await connection.execute(
       "INSERT INTO Information (time,name,createdBy_id,school,description,type) VALUES (?,?,?,?,?,?)",
       [time, name, userId, userSchool, description || "", type]
     );
-
-    res.status(201).json({ message: "Successfully created" });
+    res.status(201).json({ message: "Created successfully" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Error creating new item" });
+    res.status(500).json({ message: "Create failed" });
   } finally {
     if (connection) await connection.end();
   }
 });
 
-// Update activity
+/* ---------- UPDATE ---------- */
 app.put("/edit/:id", authenticator, async (req, res) => {
-  let connection;
-  const id = req.params.id;
   const { time, name, description, type } = req.body;
+  const id = req.params.id;
+  let connection;
 
   try {
     connection = await sql.createConnection(dbConfig);
-
     await connection.execute(
       "UPDATE Information SET time=?, name=?, description=?, type=? WHERE id=?",
       [time, name, description || "", type, id]
     );
-
-    res.status(200).json({ message: "Update success" });
+    res.json({ message: "Update success" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Updating failed" });
+    res.status(500).json({ message: "Update failed" });
   } finally {
     if (connection) await connection.end();
   }
 });
 
-// Delete activity
+/* ---------- DELETE ---------- */
 app.delete("/delete/:id", authenticator, async (req, res) => {
-  let connection;
   const id = req.params.id;
+  let connection;
 
   try {
     connection = await sql.createConnection(dbConfig);
-
     await connection.execute("DELETE FROM Information WHERE id=?", [id]);
-
-    res.status(200).json({ message: "Delete success" });
+    res.json({ message: "Delete success" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Deleting failed" });
+    res.status(500).json({ message: "Delete failed" });
   } finally {
     if (connection) await connection.end();
   }
 });
 
-// Register
+/* ---------- REGISTER ---------- */
 app.post("/register", async (req, res) => {
   const { name, email, password, role, school } = req.body;
   let connection;
 
   try {
     connection = await sql.createConnection(dbConfig);
-
     const [rows] = await connection.execute(
       "SELECT * FROM Registeration WHERE email=?",
       [email]
@@ -193,34 +178,32 @@ app.post("/register", async (req, res) => {
       [name, email, hashedPassword, role, school]
     );
 
-    res.status(201).json({ message: "Successfully registered" });
+    res.status(201).json({ message: "Registered successfully" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Error registration" });
+    res.status(500).json({ message: "Registration failed" });
   } finally {
     if (connection) await connection.end();
   }
 });
 
-// Login
+/* ---------- LOGIN ---------- */
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   let connection;
 
   try {
     connection = await sql.createConnection(dbConfig);
-
     const [rows] = await connection.execute(
       "SELECT * FROM Registeration WHERE email=?",
       [email]
     );
 
-    if (rows.length <= 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
     const valid = await bcrypt.compare(password, rows[0].password);
-
     if (!valid) {
       return res.status(401).json({ message: "Invalid password" });
     }
@@ -236,7 +219,7 @@ app.post("/login", async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    return res.json({ token });
+    res.json({ token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Login failed" });
@@ -245,7 +228,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// ================== START SERVER ==================
+/* ===================== START SERVER ===================== */
 app.listen(port, () => {
-  console.log(`✅ Server is running on port ${port}`);
+  console.log(`✅ Server running on port ${port}`);
 });
