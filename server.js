@@ -3,7 +3,9 @@ const sql = require("mysql2/promise")
 const bcrypt = require("bcrypt")
 const cors = require("cors")
 const jwt = require('jsonwebtoken')
-const port = 3000
+
+// Use PORT from environment variable (Render provides this)
+const port = process.env.PORT || 5000
 
 require('dotenv').config()
 
@@ -22,13 +24,19 @@ const app = express()
 app.use(express.json())
 const secret = process.env.JWT
 
+// ===== FIXED CORS CONFIGURATION =====
 app.use(cors({
-    origin:[
-        'http://localhost:3000'
-    ]
+    origin: [
+        'http://localhost:3000',                       // Local development
+        'https://educationreminder.netlify.app'        // Your Netlify frontend
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }))
+
 app.listen(port,()=>{
-    console.log('server is running!')
+    console.log(`Server is running on port ${port}!`)
 })
 
 function authenticator(req,res,next){
